@@ -1,13 +1,14 @@
 /* UBI Tune-Up v4 service worker — caches everything for true offline use.
  * After first load, the app works fully offline forever (or until you clear data).
  */
-const CACHE = 'ubi-v4-cache-2026-04-25-r1';
+const CACHE = 'ubi-v4-cache-2026-04-26-r2-specvault';
 const ASSETS = [
   './',
   './index.html',
   './glossary.js',
   './scenarios_v3.js',
   './wheels_v4.js',
+  './appendix_v4.js',
   './game_v4.js',
   './manifest.webmanifest',
 ];

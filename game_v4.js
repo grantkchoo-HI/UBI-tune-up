@@ -27,14 +27,22 @@ if (!window.WHEELHOUSE || !window.WHEELHOUSE.stages || window.WHEELHOUSE.stages.
     '<h2>Wheelhouse module failed to load</h2><p>Check wheels_v4.js.</p></div>';
   return;
 }
+if (!window.APPENDIX || !window.APPENDIX.stages || window.APPENDIX.stages.length === 0) {
+  document.body.innerHTML = '<div style="padding:40px;color:#fff;font-family:system-ui">' +
+    '<h2>Spec Vault (Appendix) module failed to load</h2><p>Check appendix_v4.js.</p></div>';
+  return;
+}
 
 const GLOSSARY = window.GLOSSARY;
 const SCENARIOS = window.SCENARIOS_V3;
 const WHEELHOUSE = window.WHEELHOUSE;
+const APPENDIX = window.APPENDIX;
 const TERM_COUNT = GLOSSARY.length;
 const SCENARIO_COUNT = SCENARIOS.length;
 const WH_STAGE_BY_ID = {};
 for (const s of WHEELHOUSE.stages) WH_STAGE_BY_ID[s.id] = s;
+const APPX_STAGE_BY_ID = {};
+for (const s of APPENDIX.stages) APPX_STAGE_BY_ID[s.id] = s;
 
 // Build lookup maps
 const TERMS_BY_ID = {};
@@ -168,6 +176,48 @@ function ensureWheelhouseState() {
   if (!state.wheelhouse.boss) state.wheelhouse.boss = { started: false, completed: false, bestScore: 0, lastScore: 0, attempts: 0, perfect: false, lastPlayedAt: null };
 }
 
+function defaultAppendixState() {
+  const stages = {};
+  for (const s of APPENDIX.stages) {
+    stages[s.id] = { started: false, completed: false, bestScore: 0, lastScore: 0, attempts: 0, perfect: false, missedIds: [], lastPlayedAt: null };
+  }
+  return {
+    wxp: 0,
+    totalAttempts: 0,
+    badges: {},
+    stages,
+    boss: { started: false, completed: false, bestScore: 0, lastScore: 0, attempts: 0, perfect: false, lastPlayedAt: null },
+  };
+}
+function ensureAppendixState() {
+  if (!state.appendix) state.appendix = defaultAppendixState();
+  if (!state.appendix.stages) state.appendix.stages = {};
+  if (!state.appendix.badges) state.appendix.badges = {};
+  for (const s of APPENDIX.stages) {
+    if (!state.appendix.stages[s.id]) state.appendix.stages[s.id] = { started: false, completed: false, bestScore: 0, lastScore: 0, attempts: 0, perfect: false, missedIds: [], lastPlayedAt: null };
+  }
+  if (!state.appendix.boss) state.appendix.boss = { started: false, completed: false, bestScore: 0, lastScore: 0, attempts: 0, perfect: false, lastPlayedAt: null };
+}
+
+// Zone-aware helpers — let the Wheelhouse engine drive BOTH zones.
+function zKey()   { return (session && session.zone) || 'wheelhouse'; }
+function zState() { return state[zKey()]; }
+function zMod()   { return zKey() === 'appendix' ? APPENDIX : WHEELHOUSE; }
+function zHubScreen() { return zKey() === 'appendix' ? 'appendix' : 'wheelhouse'; }
+function zRenderHub() { return zKey() === 'appendix' ? renderAppendixHub() : renderWheelhouseHub(); }
+function zStartStageFn() { return zKey() === 'appendix' ? startAppendixStage : startWheelhouseStage; }
+function zStartBossFn()  { return zKey() === 'appendix' ? startAppendixBoss  : startWheelhouseBoss; }
+function zIsBossUnlocked() { return zKey() === 'appendix' ? appxIsBossUnlocked() : whIsBossUnlocked(); }
+function zStageBadgeId(stageId) {
+  if (zKey() === 'appendix') {
+    return ({ appx_standards: 'ax_standards', appx_sizing: 'ax_sizing', appx_cockpit: 'ax_cockpit', appx_convert: 'ax_convert' })[stageId];
+  }
+  return ({ anatomy: 'wh_anatomy_master', sizing: 'wh_size_savant', tubeless: 'wh_tubeless_pro', pressure: 'wh_pressure_perfectionist', diagnosis: 'wh_wheel_doctor', build: 'wh_wheel_builder' })[stageId];
+}
+function zApprenticeBadgeId() { return zKey() === 'appendix' ? 'ax_apprentice' : 'wh_apprentice'; }
+function zChampionBadgeId()   { return zKey() === 'appendix' ? 'ax_champion'   : 'wh_champion'; }
+function zPerfectBadgeId()    { return zKey() === 'appendix' ? 'ax_perfectionist' : 'wh_perfectionist'; }
+
 const DEFAULT_STATE = () => ({
   meta: { version: SAVE_VERSION, createdAt: Date.now(), lastPlayedAt: Date.now() },
   player: {
@@ -178,6 +228,7 @@ const DEFAULT_STATE = () => ({
   },
   terms: {},
   wheelhouse: defaultWheelhouseState(),
+  appendix: defaultAppendixState(),
 });
 let state = DEFAULT_STATE();
 let session = null;
@@ -237,6 +288,7 @@ function loadState() {
     s.player.badges = s.player.badges || {};
     s.terms = s.terms || {};
     if (!s.wheelhouse) s.wheelhouse = defaultWheelhouseState();
+    if (!s.appendix) s.appendix = defaultAppendixState();
     return s;
   } catch (e) { return DEFAULT_STATE(); }
 }
@@ -256,6 +308,7 @@ function migrateFrom(rawLegacy) {
     fresh.terms = s.terms || {};
     // Wheelhouse is brand-new in v4; preserve any prior wh state if present
     if (s.wheelhouse) fresh.wheelhouse = s.wheelhouse;
+    if (s.appendix) fresh.appendix = s.appendix;
     return fresh;
   } catch (e) { return DEFAULT_STATE(); }
 }
@@ -1163,7 +1216,10 @@ function renderZonesGrid() {
   const grid = $('#mode-grid-zones');
   if (!grid) return;
   ensureWheelhouseState();
+  ensureAppendixState();
   grid.innerHTML = '';
+
+  // --- Wheelhouse zone card ---
   const stagesDone = whCountStagesComplete();
   const bossDone = !!state.wheelhouse.boss?.completed;
   const totalStages = WHEELHOUSE.stages.length;
@@ -1178,6 +1234,22 @@ function renderZonesGrid() {
   `;
   card.addEventListener('click', () => { showScreen('wheelhouse'); renderWheelhouseHub(); });
   grid.appendChild(card);
+
+  // --- Spec Vault (Appendix) zone card ---
+  const aDone = appxCountStagesComplete();
+  const aBossDone = !!state.appendix.boss?.completed;
+  const aTotal = APPENDIX.stages.length;
+  const aPct = appxTotalProgressPct();
+  const aCard = document.createElement('button');
+  aCard.className = 'mode-card new-mode' + (aDone === 0 && !aBossDone && stagesDone > 0 ? ' recommended' : '');
+  aCard.innerHTML = `
+    <div class="mode-icon">📑</div>
+    <h3 class="mode-name">The Spec Vault</h3>
+    <p class="mode-desc">Chart-driven appendix mastery — 4 stages + boss. Read the chart, choose the spec.</p>
+    <div class="mode-meta"><span>${aDone}/${aTotal} stages · ${aBossDone ? 'boss ✓' : 'boss locked'}</span><span>${aPct}% complete</span></div>
+  `;
+  aCard.addEventListener('click', () => { showScreen('appendix'); renderAppendixHub(); });
+  grid.appendChild(aCard);
 }
 
 function renderMenu() {
@@ -2293,11 +2365,14 @@ function bindUi() {
   $('#btn-home').addEventListener('click', () => {
     if (session) {
       const wasWheelhouse = !!session.isWheelhouse;
+      const wasZone = session.zone || 'wheelhouse';
       confirmModal('Quit session?', 'Your progress so far will not count.', () => {
         session = null; state.player.combo = 0;
         updateHud();
-        if (wasWheelhouse) { showScreen('wheelhouse'); renderWheelhouseHub(); }
-        else { showScreen('menu'); renderMenu(); }
+        if (wasWheelhouse) {
+          if (wasZone === 'appendix') { showScreen('appendix'); renderAppendixHub(); }
+          else { showScreen('wheelhouse'); renderWheelhouseHub(); }
+        } else { showScreen('menu'); renderMenu(); }
       });
     } else { showScreen('menu'); renderMenu(); }
   });
@@ -2322,13 +2397,23 @@ function bindUi() {
   if (whReset) whReset.addEventListener('click', () => {
     confirmModal('Reset Wheelhouse progress?', 'All Wheelhouse stage clears, WXP, and Wheelhouse badges will be erased. Main game progress is unaffected.', resetWheelhouseProgress);
   });
+  // Spec Vault hub buttons
+  const appxBack = $('#btn-appendix-back');
+  if (appxBack) appxBack.addEventListener('click', () => { showScreen('menu'); renderMenu(); });
+  const appxReset = $('#btn-appx-reset');
+  if (appxReset) appxReset.addEventListener('click', () => {
+    confirmModal('Reset Spec Vault progress?', 'All Spec Vault stage clears, WXP, and Spec Vault badges will be erased. Main game progress is unaffected.', resetAppendixProgress);
+  });
   $('#btn-quiz-quit').addEventListener('click', () => {
     const wasWheelhouse = session && session.isWheelhouse;
+    const wasZone = session && session.zone;
     confirmModal('Quit session?', 'Your current session will be discarded.', () => {
       session = null; state.player.combo = 0;
       updateHud();
-      if (wasWheelhouse) { showScreen('wheelhouse'); renderWheelhouseHub(); }
-      else { showScreen('menu'); renderMenu(); }
+      if (wasWheelhouse) {
+        if (wasZone === 'appendix') { showScreen('appendix'); renderAppendixHub(); }
+        else { showScreen('wheelhouse'); renderWheelhouseHub(); }
+      } else { showScreen('menu'); renderMenu(); }
     });
   });
   $('#btn-quiz-skip').addEventListener('click', () => {
@@ -2567,6 +2652,7 @@ function startWheelhouseStage(stageId) {
 
   session = {
     mode: 'wheelhouse',
+    zone: 'wheelhouse',
     isWheelhouse: true,
     isBoss: false,
     wheelhouseStageId: stageId,
@@ -2608,6 +2694,7 @@ function startWheelhouseBoss() {
   showModal('🏆 ' + WHEELHOUSE.boss.name, '<p>' + WHEELHOUSE.boss.intro + '</p>', () => {
     session = {
       mode: 'wheelhouse',
+      zone: 'wheelhouse',
       isWheelhouse: true,
       isBoss: true,
       wheelhouseStageId: 'boss',
@@ -2677,6 +2764,8 @@ function renderWheelhouseQuestion(q, stage) {
   const tagText = q._isReroll ? 'Re-roll · ' + (stage.icon || '🛞') + ' ' + stage.name : (stage.icon || '🛞') + ' ' + stage.name;
   const diffBadge = q.difficulty ? `<span class="diff-badge ${q.difficulty}" style="margin-left:8px">${q.difficulty}</span>` : '';
   const storyHtml = q.story ? `<div class="wh-q-story">${escapeHtml(q.story)}</div>` : '';
+  // chartHtml is RAW HTML (Spec Vault charts). Trusted content from appendix_v4.js — not user input.
+  const chartHtml = q.chartHtml ? q.chartHtml : '';
   const isMulti = q.kind === 'multi';
   const requiredCorrect = q.requiredCorrect || (isMulti ? q.choices.filter(c => c.correct).length : 1);
   const multiHint = isMulti ? `<div class="wh-q-multi-hint">Pick exactly <strong>${requiredCorrect}</strong> answers.</div>` : '';
@@ -2685,6 +2774,7 @@ function renderWheelhouseQuestion(q, stage) {
     block.innerHTML = `
       <div class="wh-q-stage-tag">${tagText}${diffBadge}</div>
       ${storyHtml}
+      ${chartHtml}
       <div class="wh-q-question">${escapeHtml(q.question)}</div>
       ${multiHint}
       <div class="wh-q-choices" id="wh-choices"></div>
@@ -2706,6 +2796,7 @@ function renderWheelhouseQuestion(q, stage) {
     block.innerHTML = `
       <div class="wh-q-stage-tag">${tagText}${diffBadge}</div>
       ${storyHtml}
+      ${chartHtml}
       <div class="wh-q-question">${escapeHtml(q.question)}</div>
       <div class="wh-q-typing-wrap"><input id="wh-typing-input" type="text" autocomplete="off" spellcheck="false" placeholder="Type your answer…"></div>
       <div class="wh-typing-hint">Press Enter to submit</div>
@@ -2805,7 +2896,8 @@ function submitWHAnswer(q) {
     const comboBonus = Math.min(state.player.combo - 1, 8) * 1;
     wxpGain += comboBonus;
     session.wxpEarned += wxpGain;
-    state.wheelhouse.wxp = (state.wheelhouse.wxp || 0) + wxpGain;
+    const _zs = zState();
+    _zs.wxp = (_zs.wxp || 0) + wxpGain;
     // Also award main XP (lighter, since this is a separate progression)
     const mainXp = Math.round(wxpGain * 0.5);
     state.player.xp += mainXp;
@@ -2959,11 +3051,11 @@ function whAnswerMatches(typed, correctAnswer, acceptedAnswers) {
 function finishWheelhouseStage() {
   if (!session || !session.isWheelhouse) return;
   const stage = session.wheelhouseStage;
-  const stState = state.wheelhouse.stages[stage.id];
+  const zs = zState();
+  const mod = zMod();
+  const stState = zs.stages[stage.id];
   // Score = first-try correct ratio over original questions only (not rerolls)
   const originalCount = stage.questions.length;
-  // We track firstTryCorrect across all answered, but we only want the original-set portion
-  // Since rerolls only happen for missed Qs, originalCorrect = (originalCount - missedIds.length)
   const originalCorrect = Math.max(0, originalCount - session.missedIds.length);
   const pct = Math.round(originalCorrect / originalCount * 100);
   const passed = pct >= Math.round((stage.passThreshold || 0.7) * 100);
@@ -2974,24 +3066,24 @@ function finishWheelhouseStage() {
   if (passed) stState.completed = true;
   stState.missedIds = session.missedIds.slice();
 
-  // Wheelhouse badges
-  const newWHBadges = [];
-  if (!state.wheelhouse.badges['wh_apprentice']) { state.wheelhouse.badges['wh_apprentice'] = { earnedAt: Date.now() }; newWHBadges.push(WHEELHOUSE.badges.find(b => b.id === 'wh_apprentice')); }
-  const stageBadgeId = {
-    anatomy: 'wh_anatomy_master', sizing: 'wh_size_savant', tubeless: 'wh_tubeless_pro',
-    pressure: 'wh_pressure_perfectionist', diagnosis: 'wh_wheel_doctor', build: 'wh_wheel_builder',
-  }[stage.id];
-  if (passed && stageBadgeId && !state.wheelhouse.badges[stageBadgeId]) {
-    state.wheelhouse.badges[stageBadgeId] = { earnedAt: Date.now() };
-    newWHBadges.push(WHEELHOUSE.badges.find(b => b.id === stageBadgeId));
+  // Zone badges (Wheelhouse OR Spec Vault — driven by session.zone)
+  const newBadges = [];
+  const apprenticeId = zApprenticeBadgeId();
+  if (!zs.badges[apprenticeId]) { zs.badges[apprenticeId] = { earnedAt: Date.now() }; newBadges.push(mod.badges.find(b => b.id === apprenticeId)); }
+  const stageBadgeId = zStageBadgeId(stage.id);
+  if (passed && stageBadgeId && !zs.badges[stageBadgeId]) {
+    zs.badges[stageBadgeId] = { earnedAt: Date.now() };
+    newBadges.push(mod.badges.find(b => b.id === stageBadgeId));
   }
-  // Perfectionist: every stage perfect
-  const allPerfect = WHEELHOUSE.stages.every(s => state.wheelhouse.stages[s.id]?.perfect);
-  if (allPerfect && !state.wheelhouse.badges['wh_perfectionist']) {
-    state.wheelhouse.badges['wh_perfectionist'] = { earnedAt: Date.now() };
-    newWHBadges.push(WHEELHOUSE.badges.find(b => b.id === 'wh_perfectionist'));
+  // Perfectionist: every stage perfect within this zone
+  const allPerfect = mod.stages.every(s => zs.stages[s.id]?.perfect);
+  const perfectId = zPerfectBadgeId();
+  if (allPerfect && !zs.badges[perfectId]) {
+    zs.badges[perfectId] = { earnedAt: Date.now() };
+    newBadges.push(mod.badges.find(b => b.id === perfectId));
   }
-  for (const b of newWHBadges) {
+  for (const b of newBadges) {
+    if (!b) continue;
     session.badgesEarnedThisSession.push(b);
     toast('🏆 ' + b.name + ' unlocked!', 'badge');
     sfxBadge();
@@ -3003,24 +3095,28 @@ function finishWheelhouseStage() {
 
 function finishWheelhouseBoss() {
   if (!session) return;
-  const totalRounds = WHEELHOUSE.boss.rounds.length;
+  const mod = zMod();
+  const zs = zState();
+  const totalRounds = mod.boss.rounds.length;
   const correctRounds = totalRounds - session.missedIds.length;
   const pct = Math.round(correctRounds / totalRounds * 100);
   const passed = pct >= 80;
 
-  const bossState = state.wheelhouse.boss;
+  const bossState = zs.boss;
   bossState.lastScore = pct;
   if (pct > (bossState.bestScore || 0)) bossState.bestScore = pct;
   if (pct === 100) bossState.perfect = true;
   if (passed) bossState.completed = true;
 
-  // Champion badge
-  const newWHBadges = [];
-  if (passed && !state.wheelhouse.badges['wh_champion']) {
-    state.wheelhouse.badges['wh_champion'] = { earnedAt: Date.now() };
-    newWHBadges.push(WHEELHOUSE.badges.find(b => b.id === 'wh_champion'));
+  // Champion badge for the active zone
+  const newBadges = [];
+  const champId = zChampionBadgeId();
+  if (passed && !zs.badges[champId]) {
+    zs.badges[champId] = { earnedAt: Date.now() };
+    newBadges.push(mod.badges.find(b => b.id === champId));
   }
-  for (const b of newWHBadges) {
+  for (const b of newBadges) {
+    if (!b) continue;
     session.badgesEarnedThisSession.push(b);
     toast('🏆 ' + b.name + ' unlocked!', 'badge');
     sfxBadge();
@@ -3034,8 +3130,11 @@ function renderWHResults(isBoss) {
   hideAllInputs();
   $('#wheelhouse-block').classList.add('hidden');
   showScreen('results');
+  const mod = zMod();
+  const zs  = zState();
+  const zoneLabel = zKey() === 'appendix' ? 'Spec Vault' : 'Wheelhouse';
   const stage = session.wheelhouseStage;
-  const totalOriginal = isBoss ? WHEELHOUSE.boss.rounds.length : stage.questions.length;
+  const totalOriginal = isBoss ? mod.boss.rounds.length : stage.questions.length;
   const originalCorrect = Math.max(0, totalOriginal - session.missedIds.length);
   const pct = Math.round(originalCorrect / totalOriginal * 100);
   const passed = pct >= Math.round((isBoss ? 0.8 : (stage.passThreshold || 0.7)) * 100);
@@ -3051,7 +3150,7 @@ function renderWHResults(isBoss) {
 
   let msg;
   if (isBoss) {
-    msg = passed ? 'Boss down. The whole Wheelhouse is yours.' : 'So close. Re-run any stage to sharpen up, then come back for the boss.';
+    msg = passed ? `Boss down. The whole ${zoneLabel} is yours.` : 'So close. Re-run any stage to sharpen up, then come back for the boss.';
   } else {
     msg = pct === 100 ? 'Perfect run.' :
           pct >= 90 ? 'Strong stage clear.' :
@@ -3061,9 +3160,9 @@ function renderWHResults(isBoss) {
   $('#results-host-msg').textContent = '"' + msg + '"';
 
   $('#xp-breakdown').innerHTML = `
-    <div class="xp-line"><span>Wheelhouse XP earned</span><span>+${session.wxpEarned} WXP</span></div>
+    <div class="xp-line"><span>${zoneLabel} XP earned</span><span>+${session.wxpEarned} WXP</span></div>
     <div class="xp-line"><span>Main XP (50% sync)</span><span>+${session.xpEarnedThisSession} XP</span></div>
-    <div class="xp-line total"><span>Total WXP balance</span><span>${state.wheelhouse.wxp}</span></div>
+    <div class="xp-line total"><span>Total ${zoneLabel} WXP balance</span><span>${zs.wxp}</span></div>
   `;
 
   // Badges
@@ -3089,30 +3188,35 @@ function renderWHResults(isBoss) {
     document.querySelectorAll('#results-review .review-item').forEach(el => el.addEventListener('click', () => el.classList.toggle('expanded')));
   } else reviewSec.classList.add('hidden');
 
-  // Next action
+  // Next action — zone-aware (Wheelhouse OR Spec Vault)
   const naWrap = $('#next-action-wrap');
+  const zoneScreen = zHubScreen();
+  const startStageFn = zStartStageFn();
+  const startBossFn = zStartBossFn();
+  const renderHubFn = zKey() === 'appendix' ? renderAppendixHub : renderWheelhouseHub;
+  const hubLabel = zKey() === 'appendix' ? '📑 Spec Vault' : '🛞 Wheelhouse';
   let naText, naBtn, naAction;
   if (passed) {
     if (isBoss) {
-      naText = '🏆 <strong>Wheelhouse cleared!</strong> Back to the menu — or replay any stage for gold stars.';
-      naBtn = 'Back to Wheelhouse';
-      naAction = 'wheelhouse';
+      naText = `🏆 <strong>${zoneLabel} cleared!</strong> Back to the menu — or replay any stage for gold stars.`;
+      naBtn = `Back to ${zoneLabel}`;
+      naAction = 'zone';
     } else {
-      const idx = WHEELHOUSE.stages.findIndex(s => s.id === stage.id);
-      const next = WHEELHOUSE.stages[idx + 1];
+      const idx = mod.stages.findIndex(s => s.id === stage.id);
+      const next = mod.stages[idx + 1];
       if (next) {
         naText = `🚀 <strong>${escapeHtml(next.name)}</strong> is unlocked. Keep the momentum.`;
         naBtn = 'Next Stage →';
         naAction = 'next-stage';
         session._nextStageId = next.id;
-      } else if (whIsBossUnlocked()) {
-        naText = '🏆 <strong>BOSS UNLOCKED</strong> — the Walk-In Wheel Rebuild awaits.';
+      } else if (zIsBossUnlocked()) {
+        naText = `🏆 <strong>BOSS UNLOCKED</strong> — ${escapeHtml(mod.boss.name.replace(/^BOSS:\s*/, ''))} awaits.`;
         naBtn = 'Boss Battle →';
         naAction = 'boss';
       } else {
-        naText = 'Back to the Wheelhouse hub for the next stage.';
-        naBtn = 'Wheelhouse →';
-        naAction = 'wheelhouse';
+        naText = `Back to the ${zoneLabel} hub for the next stage.`;
+        naBtn = `${zoneLabel} →`;
+        naAction = 'zone';
       }
     }
   } else {
@@ -3122,22 +3226,22 @@ function renderWHResults(isBoss) {
   }
   naWrap.innerHTML = `<div class="next-action"><div class="na-text">${naText}</div><button class="btn secondary" id="btn-wh-next">${naBtn}</button></div>`;
   $('#btn-wh-next').addEventListener('click', () => {
-    if (naAction === 'wheelhouse') { session = null; showScreen('wheelhouse'); renderWheelhouseHub(); }
-    else if (naAction === 'next-stage' && session._nextStageId) { const nid = session._nextStageId; session = null; startWheelhouseStage(nid); }
-    else if (naAction === 'boss') { session = null; startWheelhouseBoss(); }
-    else if (naAction === 'replay') { const sid = stage.id; const wasBoss = isBoss; session = null; if (wasBoss) startWheelhouseBoss(); else startWheelhouseStage(sid); }
+    if (naAction === 'zone') { session = null; showScreen(zoneScreen); renderHubFn(); }
+    else if (naAction === 'next-stage' && session._nextStageId) { const nid = session._nextStageId; session = null; startStageFn(nid); }
+    else if (naAction === 'boss') { session = null; startBossFn(); }
+    else if (naAction === 'replay') { const sid = stage.id; const wasBoss = isBoss; session = null; if (wasBoss) startBossFn(); else startStageFn(sid); }
   });
 
-  // Wire results-action buttons to send to wheelhouse hub instead of menu
+  // Results-action buttons — route back to the active zone hub.
   const menuBtn = $('#btn-results-menu');
   const againBtn = $('#btn-results-again');
   if (menuBtn) {
-    menuBtn.textContent = '🛞 Wheelhouse';
-    menuBtn.onclick = () => { session = null; showScreen('wheelhouse'); renderWheelhouseHub(); };
+    menuBtn.textContent = hubLabel;
+    menuBtn.onclick = () => { session = null; showScreen(zoneScreen); renderHubFn(); };
   }
   if (againBtn) {
     againBtn.textContent = 'Replay Stage';
-    againBtn.onclick = () => { const sid = stage.id; const wasBoss = isBoss; session = null; if (wasBoss) startWheelhouseBoss(); else startWheelhouseStage(sid); };
+    againBtn.onclick = () => { const sid = stage.id; const wasBoss = isBoss; session = null; if (wasBoss) startBossFn(); else startStageFn(sid); };
   }
 }
 
@@ -3146,6 +3250,241 @@ function resetWheelhouseProgress() {
   persistNow();
   toast('Wheelhouse progress reset.', '');
   renderWheelhouseHub();
+}
+
+// ============================================================
+// ============== SPEC VAULT (APPENDIX) — chart zone ==========
+// ============================================================
+// Reuses the Wheelhouse engine via session.zone='appendix'.
+// Owns its own state slot (state.appendix), badges, and hub.
+
+function appxStageById(id) { return APPX_STAGE_BY_ID[id] || null; }
+
+function appxIsStageUnlocked(stageId) {
+  ensureAppendixState();
+  const idx = APPENDIX.stages.findIndex(s => s.id === stageId);
+  if (idx <= 0) return true;
+  const prevId = APPENDIX.stages[idx - 1].id;
+  return !!state.appendix.stages[prevId]?.completed;
+}
+function appxIsBossUnlocked() {
+  ensureAppendixState();
+  return APPENDIX.stages.every(s => state.appendix.stages[s.id]?.completed);
+}
+function appxCountStagesComplete() {
+  ensureAppendixState();
+  let c = 0;
+  for (const s of APPENDIX.stages) if (state.appendix.stages[s.id]?.completed) c++;
+  return c;
+}
+function appxTotalProgressPct() {
+  ensureAppendixState();
+  const total = APPENDIX.stages.length + 1;
+  let done = appxCountStagesComplete();
+  if (state.appendix.boss?.completed) done++;
+  return Math.round(done / total * 100);
+}
+function nextAppendixRecommendation() {
+  ensureAppendixState();
+  for (const s of APPENDIX.stages) {
+    const st = state.appendix.stages[s.id];
+    if (!st?.completed) return { label: s.name };
+  }
+  if (!state.appendix.boss?.completed) return { label: APPENDIX.boss.name };
+  return null;
+}
+
+function renderAppendixHub() {
+  ensureAppendixState();
+  const grid = $('#appx-stage-grid');
+  const stats = $('#appx-hero-stats');
+  if (!grid || !stats) return;
+
+  stats.innerHTML = `
+    <div class="wh-stat"><span class="wh-stat-value">${state.appendix.wxp}</span><span class="wh-stat-label">WXP</span></div>
+    <div class="wh-stat"><span class="wh-stat-value">${appxCountStagesComplete()}/${APPENDIX.stages.length}</span><span class="wh-stat-label">Stages</span></div>
+    <div class="wh-stat"><span class="wh-stat-value">${state.appendix.boss?.completed ? '✓' : '—'}</span><span class="wh-stat-label">Boss</span></div>
+  `;
+  const pct = appxTotalProgressPct();
+  $('#appx-zone-progress').style.width = pct + '%';
+  $('#appx-zone-progress-text').textContent = pct + '% complete' + (pct === 100 ? ' · Spec Vault cleared!' : '');
+
+  grid.innerHTML = '';
+  APPENDIX.stages.forEach((stage, idx) => {
+    const st = state.appendix.stages[stage.id];
+    const unlocked = appxIsStageUnlocked(stage.id);
+    const complete = !!st?.completed;
+    const inProgress = !!st?.started && !complete;
+    const card = document.createElement('button');
+    let cls = 'wh-stage-card';
+    if (!unlocked) cls += ' locked';
+    else if (complete) cls += ' complete';
+    else if (inProgress) cls += ' in-progress';
+    card.className = cls;
+    card.disabled = !unlocked;
+
+    let statusLabel = 'Locked', statusCls = 'locked';
+    if (unlocked && complete) { statusLabel = `Cleared · ${st.bestScore}%`; statusCls = 'complete'; }
+    else if (unlocked && inProgress) { statusLabel = `In progress · last ${st.lastScore}%`; statusCls = 'in-progress'; }
+    else if (unlocked) { statusLabel = 'Ready'; statusCls = ''; }
+
+    const stars = [];
+    for (let i = 0; i < 3; i++) {
+      const filled = (st?.bestScore || 0) >= [70, 85, 100][i];
+      const gold = i === 2 && filled;
+      stars.push(`<div class="wh-star ${filled ? (gold ? 'gold' : 'filled') : ''}"></div>`);
+    }
+
+    card.innerHTML = `
+      <div style="display:flex;align-items:flex-start;gap:12px;justify-content:space-between">
+        <div style="display:flex;align-items:center;gap:10px">
+          <div class="wh-stage-icon">${stage.icon}</div>
+          <div>
+            <h3 class="wh-stage-name">Stage ${idx + 1} — ${escapeHtml(stage.name)}</h3>
+            <p class="wh-stage-sub">${escapeHtml(stage.subtitle)}</p>
+          </div>
+        </div>
+        <span class="wh-stage-status ${statusCls}">${statusLabel}</span>
+      </div>
+      <div class="wh-stage-blurb">${escapeHtml(stage.blurb)}</div>
+      <div class="wh-stage-meta">
+        <span>${stage.questions.length} Qs · pass ≥${Math.round((stage.passThreshold||0.7)*100)}%</span>
+        <div class="wh-stage-stars">${stars.join('')}</div>
+      </div>
+    `;
+    if (unlocked) card.addEventListener('click', () => startAppendixStage(stage.id));
+    grid.appendChild(card);
+  });
+
+  // Boss card
+  const bossUnlocked = appxIsBossUnlocked();
+  const bossSt = state.appendix.boss;
+  const bossCard = document.createElement('button');
+  let bcls = 'wh-stage-card boss';
+  if (!bossUnlocked) bcls += ' locked';
+  if (bossSt?.completed) bcls += ' complete';
+  bossCard.className = bcls;
+  bossCard.disabled = !bossUnlocked;
+  let bossStatus = 'Locked — clear all 4 stages first';
+  let bossStatusCls = 'locked';
+  if (bossUnlocked && bossSt?.completed) { bossStatus = `Boss cleared · best ${bossSt.bestScore}%`; bossStatusCls = 'complete'; }
+  else if (bossUnlocked) { bossStatus = 'BOSS · ready'; bossStatusCls = 'boss'; }
+  bossCard.innerHTML = `
+    <div style="display:flex;align-items:flex-start;gap:12px;justify-content:space-between">
+      <div style="display:flex;align-items:center;gap:10px">
+        <div class="wh-stage-icon">${APPENDIX.boss.icon}</div>
+        <div>
+          <h3 class="wh-stage-name">${escapeHtml(APPENDIX.boss.name)}</h3>
+          <p class="wh-stage-sub">${escapeHtml(APPENDIX.boss.subtitle)}</p>
+        </div>
+      </div>
+      <span class="wh-stage-status ${bossStatusCls}">${bossStatus}</span>
+    </div>
+    <div class="wh-stage-blurb">${escapeHtml(APPENDIX.boss.blurb)}</div>
+    <div class="wh-stage-meta">
+      <span>${APPENDIX.boss.rounds.length} rounds · pass ≥80%</span>
+    </div>
+  `;
+  if (bossUnlocked) bossCard.addEventListener('click', () => startAppendixBoss());
+  grid.appendChild(bossCard);
+}
+
+function startAppendixStage(stageId) {
+  ensureAppendixState();
+  const stage = appxStageById(stageId);
+  if (!stage) return;
+  if (!appxIsStageUnlocked(stageId)) { toast('Complete the previous stage first', 'warn'); return; }
+
+  const stState = state.appendix.stages[stageId];
+  stState.started = true;
+  stState.attempts = (stState.attempts || 0) + 1;
+  stState.lastPlayedAt = Date.now();
+  state.appendix.totalAttempts = (state.appendix.totalAttempts || 0) + 1;
+
+  const qs = stage.questions.slice();
+  for (let i = qs.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [qs[i], qs[j]] = [qs[j], qs[i]];
+  }
+
+  session = {
+    mode: 'wheelhouse',
+    zone: 'appendix',
+    isWheelhouse: true,
+    isBoss: false,
+    wheelhouseStageId: stageId,
+    wheelhouseStage: stage,
+    questions: qs,
+    rerollQueue: [],
+    inRerollPhase: false,
+    currentIndex: -1,
+    correctCount: 0,
+    firstTryCorrect: 0,
+    skippedCount: 0,
+    longestWrongStreak: 0,
+    currentWrongStreak: 0,
+    startedAt: Date.now(),
+    wxpEarned: 0,
+    xpEarnedThisSession: 0,
+    badgesEarnedThisSession: [],
+    missedIds: [],
+    answeredIds: [],
+  };
+  state.player.combo = 0;
+  showScreen('quiz');
+  $('#quiz-mode-label').textContent = stage.icon + ' Spec Vault · ' + stage.name;
+  sfxStart();
+  updateHud();
+  whNextQuestion();
+}
+
+function startAppendixBoss() {
+  ensureAppendixState();
+  if (!appxIsBossUnlocked()) { toast('Clear all 4 stages to unlock the boss', 'warn'); return; }
+
+  state.appendix.boss.started = true;
+  state.appendix.boss.attempts = (state.appendix.boss.attempts || 0) + 1;
+  state.appendix.boss.lastPlayedAt = Date.now();
+  state.appendix.totalAttempts = (state.appendix.totalAttempts || 0) + 1;
+
+  showModal('🏆 ' + APPENDIX.boss.name, '<p>' + APPENDIX.boss.intro + '</p>', () => {
+    session = {
+      mode: 'wheelhouse',
+      zone: 'appendix',
+      isWheelhouse: true,
+      isBoss: true,
+      wheelhouseStageId: 'boss',
+      wheelhouseStage: { id: 'boss', name: APPENDIX.boss.name, icon: APPENDIX.boss.icon, passThreshold: 0.8, questions: APPENDIX.boss.rounds.slice() },
+      questions: APPENDIX.boss.rounds.slice(),
+      rerollQueue: [],
+      inRerollPhase: false,
+      currentIndex: -1,
+      correctCount: 0,
+      firstTryCorrect: 0,
+      skippedCount: 0,
+      longestWrongStreak: 0,
+      currentWrongStreak: 0,
+      startedAt: Date.now(),
+      wxpEarned: 0,
+      xpEarnedThisSession: 0,
+      badgesEarnedThisSession: [],
+      missedIds: [],
+      answeredIds: [],
+    };
+    state.player.combo = 0;
+    showScreen('quiz');
+    $('#quiz-mode-label').textContent = APPENDIX.boss.icon + ' BOSS · ' + APPENDIX.boss.name;
+    sfxStart();
+    updateHud();
+    whNextQuestion();
+  }, 'Let\'s do this', null);
+}
+
+function resetAppendixProgress() {
+  state.appendix = defaultAppendixState();
+  persistNow();
+  toast('Spec Vault progress reset.', '');
+  renderAppendixHub();
 }
 
 // ============= BOOT =============
@@ -3164,7 +3503,7 @@ function boot() {
     const seen = localStorage.getItem(INTRO_KEY);
     if (!seen) { localStorage.setItem(INTRO_KEY, '1'); setTimeout(showIntro, 400); }
   } catch (e) {}
-  console.log('UBI Tune-Up v4 loaded.', TERM_COUNT, 'terms.', SCENARIO_COUNT, 'scenarios.', CONFUSABLE_PAIRS.length, 'confusable pairs.', WHEELHOUSE.stages.length, 'Wheelhouse stages,', WHEELHOUSE.boss.rounds.length, 'boss rounds.');
+  console.log('UBI Tune-Up v4 loaded.', TERM_COUNT, 'terms.', SCENARIO_COUNT, 'scenarios.', CONFUSABLE_PAIRS.length, 'confusable pairs.', WHEELHOUSE.stages.length, 'Wheelhouse stages,', WHEELHOUSE.boss.rounds.length, 'boss rounds. Spec Vault:', APPENDIX.stages.length, 'stages,', APPENDIX.boss.rounds.length, 'boss rounds.');
 }
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
 else boot();
