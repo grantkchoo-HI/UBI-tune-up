@@ -1330,6 +1330,54 @@ const HOST_INTRO = ['Welcome to the shop. Let\'s tune some brain cells.', 'Grab 
 const HOST_OVERCONFIDENT = ['Oof — you were sure on that one. That\'s the danger zone.', 'Confidence + miss = priority review. We\'ll come back hard.', 'Logged in the "thought I knew it" pile. Good — now you do.'];
 const HOST_SCENARIO_CORRECT = ['Diagnosed. Customer rolls out happy.', 'Read the symptoms, found the cause.', 'That\'s what UBI trains — transfer.', 'Real shop thinking.'];
 const HOST_SCENARIO_WRONG = ['Good guess, but the real mechanic\'s move is below.', 'This is why we run cases — transfer takes practice.', 'Close, but not the diagnosis.'];
+const HOST_CONFIRM_PROMPTS = ['Lock it in?', 'Final answer?', 'Torque this in?', 'Send it?', 'Commit to it?', 'Ready to roll?'];
+
+// ============= CONFIRM-BEFORE-SUBMIT =============
+// Two-step "select then lock in" flow for MC, Confusables, Learn-mode MC, and
+// Flashcard rating. Timed modes (Speed Drill, Boss Ride) bypass automatically:
+// speed under pressure is the design intent there. Scenario / Wrench Path /
+// Wheelhouse / Typing already have explicit submit buttons — they get label-
+// only polish + a "Final answer?" preview, no flow change.
+let _pending = null;  // { label, onConfirm, onCancel } or null
+function armConfirm({ label, onConfirm, onCancel }) {
+  // Timed modes (Speed Drill, Boss Ride): skip the confirm step entirely.
+  const mode = session && MODES[session.mode];
+  if (mode && mode.timed) { onConfirm(); return; }
+  // Replacing a prior pending: don't fire the old onCancel — the caller has
+  // already cleaned up the visual state by stripping .pending classes.
+  _pending = { label, onConfirm, onCancel };
+  const bar = $('#confirm-bar');
+  if (!bar) { onConfirm(); return; }
+  $('#cb-label').textContent = label;
+  $('#cb-prompt').textContent = pick(HOST_CONFIRM_PROMPTS);
+  bar.classList.remove('hidden');
+  // Focus the lock-in button so Enter confirms (keyboard parity with typing modes).
+  setTimeout(() => { const lock = $('#cb-lock'); if (lock) lock.focus(); }, 0);
+}
+function commitPending() {
+  if (!_pending) return;
+  const cb = _pending.onConfirm;
+  _pending = null;
+  const bar = $('#confirm-bar');
+  if (bar) bar.classList.add('hidden');
+  // Strip .pending so the post-grade .correct / .wrong / .dim CSS wins.
+  $$('.answer-btn.pending, .fc-rate-btn.pending').forEach(el => el.classList.remove('pending'));
+  cb();
+}
+function clearPending() {
+  if (!_pending) {
+    // Always hide the bar even if no pending — defensive cleanup on screen changes.
+    const bar = $('#confirm-bar');
+    if (bar) bar.classList.add('hidden');
+    return;
+  }
+  const onCancel = _pending.onCancel;
+  _pending = null;
+  const bar = $('#confirm-bar');
+  if (bar) bar.classList.add('hidden');
+  $$('.answer-btn.pending, .fc-rate-btn.pending').forEach(el => el.classList.remove('pending'));
+  if (onCancel) onCancel();
+}
 
 function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
 function hostQuip(msg) {
@@ -1727,6 +1775,7 @@ function nextQuestion() {
 
 // ============= RENDER =============
 function hideAllInputs() {
+  clearPending();
   $('#learn-block').classList.add('hidden');
   $('#quiz-prompt').classList.add('hidden');
   $('#flashcard-wrap').classList.add('hidden');
@@ -1740,6 +1789,9 @@ function hideAllInputs() {
   $('#scenario-block').classList.add('hidden');
   $('#selfcheck-answer-block').classList.add('hidden');
   $('#selfcheck-review-block').classList.add('hidden');
+  // Hide the wheelhouse block too — renderWheelhouseQuestion explicitly
+  // unhides it, so this is safe and prevents leaks across mode switches.
+  $('#wheelhouse-block')?.classList.add('hidden');
 }
 
 function renderQuestion(q, mode) {
@@ -1800,7 +1852,16 @@ function renderMC(q, term) {
     const btn = document.createElement('button');
     btn.className = 'answer-btn';
     btn.innerHTML = '<span class="letter">' + letters[i] + '</span><span>' + escapeHtml(c.text) + '</span>';
-    btn.addEventListener('click', () => { if (!answerLocked) submitAnswer(i); });
+    btn.addEventListener('click', () => {
+      if (answerLocked) return;
+      $$('#quiz-answers .answer-btn').forEach(b => b.classList.remove('pending'));
+      btn.classList.add('pending');
+      armConfirm({
+        label: 'You picked ' + letters[i] + ' — ' + c.text,
+        onConfirm: () => submitAnswer(i),
+        onCancel: () => btn.classList.remove('pending'),
+      });
+    });
     area.appendChild(btn);
   });
 }
@@ -1815,7 +1876,16 @@ function renderConfusables(q, term) {
     const btn = document.createElement('button');
     btn.className = 'answer-btn';
     btn.innerHTML = '<span class="letter">' + letters[i] + '</span><span><strong>' + escapeHtml(c.text) + '</strong></span>';
-    btn.addEventListener('click', () => { if (!answerLocked) submitAnswer(i); });
+    btn.addEventListener('click', () => {
+      if (answerLocked) return;
+      $$('#quiz-answers .answer-btn').forEach(b => b.classList.remove('pending'));
+      btn.classList.add('pending');
+      armConfirm({
+        label: 'You picked ' + letters[i] + ' — ' + c.text,
+        onConfirm: () => submitAnswer(i),
+        onCancel: () => btn.classList.remove('pending'),
+      });
+    });
     area.appendChild(btn);
   });
 }
@@ -1830,7 +1900,19 @@ function renderTyping(q, term) {
   input.value = '';
   input.disabled = false;
   input.focus();
-  $('#typing-hint').textContent = 'Press Enter to submit';
+  $('#typing-hint').textContent = 'Press Enter to lock in';
+  const preview = $('#typing-preview');
+  if (preview) preview.classList.add('hidden');
+  input.oninput = () => {
+    const v = input.value.trim();
+    if (!preview) return;
+    if (v.length >= 3) {
+      $('#typing-preview-text').textContent = '"' + v + '" — Enter to lock in';
+      preview.classList.remove('hidden');
+    } else {
+      preview.classList.add('hidden');
+    }
+  };
 }
 
 function renderFillBlank(q, term) {
@@ -1844,7 +1926,19 @@ function renderFillBlank(q, term) {
   input.disabled = false;
   input.focus();
   $('.typing-input-wrap').classList.remove('correct', 'wrong');
-  $('#fill-hint').textContent = 'Type the missing word · Enter to submit';
+  $('#fill-hint').textContent = 'Type the missing word · Enter to lock in';
+  const preview = $('#fill-preview');
+  if (preview) preview.classList.add('hidden');
+  input.oninput = () => {
+    const v = input.value.trim();
+    if (!preview) return;
+    if (v.length >= 3) {
+      $('#fill-preview-text').textContent = '"' + v + '" — Enter to lock in';
+      preview.classList.remove('hidden');
+    } else {
+      preview.classList.add('hidden');
+    }
+  };
 }
 
 function renderFlashcard(q) {
@@ -1998,7 +2092,8 @@ function renderScenarioV3(q) {
     <div class="scen-question">${escapeHtml(qText)}</div>
     ${multiHint}
     <div class="scen-choices" id="scen-choices"></div>
-    <button class="btn primary scen-submit-btn" id="btn-scen-submit" disabled>Submit diagnosis</button>
+    <div class="confirm-preview hidden" id="scen-preview"><span class="cp-label">Final answer?</span><span class="cp-text" id="scen-preview-text"></span></div>
+    <button class="btn primary scen-submit-btn" id="btn-scen-submit" disabled>🔒 Lock in diagnosis</button>
   `;
   const choicesEl = $('#scen-choices');
   q.choices.forEach((c, i) => {
@@ -2034,6 +2129,18 @@ function toggleScenChoice(q, idx, el) {
   const btn = $('#btn-scen-submit');
   const needed = q.selectKind === 'multi' ? q.requiredCorrect : 1;
   btn.disabled = q._selectedIdxs.length !== needed;
+  const preview = $('#scen-preview');
+  if (preview) {
+    if (q._selectedIdxs.length === needed) {
+      const letters = ['A', 'B', 'C', 'D', 'E', 'F'];
+      const lettersPicked = q._selectedIdxs.slice().sort((a,b)=>a-b).map(i => letters[i]).join(', ');
+      const verb = q.selectKind === 'multi' ? 'You diagnosed: ' : 'You picked: ';
+      $('#scen-preview-text').textContent = verb + lettersPicked;
+      preview.classList.remove('hidden');
+    } else {
+      preview.classList.add('hidden');
+    }
+  }
 }
 
 function submitScenario(q) {
@@ -2140,7 +2247,8 @@ function renderWrenchPath(q) {
     <div class="scen-story">${escapeHtml(chain.story)}</div>
     <div class="scen-question">${escapeHtml(step.prompt)}</div>
     <div class="scen-choices" id="scen-choices"></div>
-    <button class="btn primary scen-submit-btn" id="btn-scen-submit" disabled>Take this step →</button>
+    <div class="confirm-preview hidden" id="wrench-preview"><span class="cp-label">Final move?</span><span class="cp-text" id="wrench-preview-text"></span></div>
+    <button class="btn primary scen-submit-btn" id="btn-scen-submit" disabled>🔒 Take this step</button>
   `;
   const choicesEl = $('#scen-choices');
   shuffled.forEach((c, i) => {
@@ -2154,6 +2262,11 @@ function renderWrenchPath(q) {
       row.classList.add('selected');
       q._pickedIdx = i;
       $('#btn-scen-submit').disabled = false;
+      const preview = $('#wrench-preview');
+      if (preview) {
+        $('#wrench-preview-text').textContent = letters[i] + ' — ' + c.text;
+        preview.classList.remove('hidden');
+      }
     });
     choicesEl.appendChild(row);
   });
@@ -2318,7 +2431,7 @@ function renderSelfCheck(q) {
       </div>
       <div class="sc-conf-hint">1 = no idea · 5 = dead certain</div>
     </div>
-    <button class="btn primary" id="btn-sc-next" disabled>Next →</button>
+    <button class="btn primary" id="btn-sc-next" disabled>Next answer →</button>
   `;
   const ta = $('#sc-textarea');
   const btn = $('#btn-sc-next');
@@ -2382,7 +2495,7 @@ function renderSelfCheckReview() {
       <div class="sc-review-body">Compare your answers to the real definitions. Be honest — this is where the learning happens. If you rated yourself confident but your answer is off, we'll flag that term as <em>overconfident</em> and bump it in your review queue.</div>
     </div>
     ${rows}
-    <button class="btn primary sc-submit-all" id="btn-sc-submit-all" disabled>Submit all grades</button>
+    <button class="btn primary sc-submit-all" id="btn-sc-submit-all" disabled>🔒 Lock in grades</button>
   `;
   sfxReveal();
 
@@ -2866,6 +2979,13 @@ document.addEventListener('keydown', (e) => {
       }
       return;
     }
+    // Pending-confirm interception: Enter locks in, Escape cancels.
+    // Comes after the self-check answering branch but before per-mode handlers
+    // so swap-keys (1-4 / A-D) fall through and click the new pending button.
+    if (_pending) {
+      if (e.key === 'Enter') { e.preventDefault(); commitPending(); return; }
+      if (e.key === 'Escape') { e.preventDefault(); clearPending(); return; }
+    }
     if (q.kind === 'flashcard') {
       if (e.key === ' ' || e.key === 'Spacebar') {
         e.preventDefault();
@@ -2874,7 +2994,12 @@ document.addEventListener('keydown', (e) => {
       } else if (!answerLocked && q._flipped) {
         const ratings = { '1': 'again', '2': 'hard', '3': 'good', '4': 'easy' };
         const r = ratings[e.key];
-        if (r) { e.preventDefault(); onFlashcardButton(r); }
+        if (r) {
+          e.preventDefault();
+          // Route through the rating button click so armConfirm handles the pending step.
+          const btn = document.querySelector(`.fc-rate-btn[data-rate="${r}"]`);
+          if (btn) btn.click();
+        }
       }
       return;
     }
@@ -2906,7 +3031,13 @@ document.addEventListener('keydown', (e) => {
       }
       const keyMap = { '1': 0, '2': 1, '3': 2, '4': 3, 'a': 0, 'b': 1, 'c': 2, 'd': 3 };
       const idx = keyMap[e.key.toLowerCase()];
-      if (idx !== undefined && idx < q.choices.length) { e.preventDefault(); submitAnswer(idx); }
+      if (idx !== undefined && idx < q.choices.length) {
+        e.preventDefault();
+        // Route through the rendered button so armConfirm handles the pending
+        // step (or short-circuits in timed modes).
+        const btn = $$('#quiz-answers .answer-btn')[idx];
+        if (btn) btn.click();
+      }
     } else if (q.kind === 'typing' || q.kind === 'fill_blank') {
       if (e.key === 'Enter') { e.preventDefault(); submitAnswer(null); }
     }
@@ -3031,7 +3162,22 @@ function bindUi() {
     glossaryFilter = btn.dataset.filter;
     renderGlossaryList($('#glossary-search').value, null);
   });
-  $$('.fc-rate-btn').forEach(btn => { btn.addEventListener('click', () => onFlashcardButton(btn.dataset.rate)); });
+  $$('.fc-rate-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      if (answerLocked) return;
+      $$('.fc-rate-btn').forEach(b => b.classList.remove('pending'));
+      btn.classList.add('pending');
+      const rateLabel = btn.querySelector('.rate-label')?.textContent || btn.dataset.rate;
+      armConfirm({
+        label: 'You rated this ' + rateLabel,
+        onConfirm: () => onFlashcardButton(btn.dataset.rate),
+        onCancel: () => btn.classList.remove('pending'),
+      });
+    });
+  });
+  // Confirm-bar buttons (one-time wiring; armConfirm fills in callbacks per pick).
+  $('#cb-lock').addEventListener('click', () => commitPending());
+  $('#cb-change').addEventListener('click', () => clearPending());
 }
 
 // ============================================================
@@ -3371,7 +3517,8 @@ function renderWheelhouseQuestion(q, stage) {
       <div class="wh-q-question">${escapeHtml(qText)}</div>
       ${multiHint}
       <div class="wh-q-choices" id="wh-choices"></div>
-      <button class="btn primary wh-q-submit" id="btn-wh-submit" disabled>${isMulti ? 'Submit answer' : 'Submit'}</button>
+      <div class="confirm-preview hidden" id="wh-preview"><span class="cp-label">Final answer?</span><span class="cp-text" id="wh-preview-text"></span></div>
+      <button class="btn primary wh-q-submit" id="btn-wh-submit" disabled>🔒 Lock in answer</button>
     `;
     const choicesEl = $('#wh-choices');
     const letters = ['A', 'B', 'C', 'D', 'E', 'F'];
@@ -3392,13 +3539,25 @@ function renderWheelhouseQuestion(q, stage) {
       ${chartHtml}
       <div class="wh-q-question">${escapeHtml(qText)}</div>
       <div class="wh-q-typing-wrap"><input id="wh-typing-input" type="text" autocomplete="off" spellcheck="false" placeholder="Type your answer…"></div>
-      <div class="wh-typing-hint">Press Enter to submit</div>
-      <button class="btn primary wh-q-submit" id="btn-wh-submit">Submit</button>
+      <div class="wh-typing-hint" id="wh-typing-hint">Press Enter to lock in</div>
+      <div class="confirm-preview hidden" id="wh-typing-preview"><span class="cp-label">Review your answer</span><span class="cp-text" id="wh-typing-preview-text"></span></div>
+      <button class="btn primary wh-q-submit" id="btn-wh-submit">🔒 Lock in answer</button>
     `;
     const input = $('#wh-typing-input');
     input.value = '';
     input.disabled = false;
     input.focus();
+    input.addEventListener('input', () => {
+      const v = input.value.trim();
+      const preview = $('#wh-typing-preview');
+      if (!preview) return;
+      if (v.length >= 3) {
+        $('#wh-typing-preview-text').textContent = '"' + v + '" — Enter to lock in';
+        preview.classList.remove('hidden');
+      } else {
+        preview.classList.add('hidden');
+      }
+    });
     input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); submitWHAnswer(q); } });
     $('#btn-wh-submit').addEventListener('click', () => submitWHAnswer(q));
   }
@@ -3421,6 +3580,18 @@ function toggleWHChoice(q, idx, el, isMulti, requiredCorrect) {
   }
   const btn = $('#btn-wh-submit');
   if (btn) btn.disabled = q._selectedIdxs.length !== requiredCorrect;
+  const preview = $('#wh-preview');
+  if (preview) {
+    if (q._selectedIdxs.length === requiredCorrect) {
+      const letters = ['A', 'B', 'C', 'D', 'E', 'F'];
+      const lettersPicked = q._selectedIdxs.slice().sort((a,b)=>a-b).map(i => letters[i]).join(', ');
+      const verb = isMulti ? 'You picked: ' : 'You picked: ';
+      $('#wh-preview-text').textContent = verb + lettersPicked;
+      preview.classList.remove('hidden');
+    } else {
+      preview.classList.add('hidden');
+    }
+  }
 }
 
 function submitWHAnswer(q) {

@@ -161,8 +161,29 @@ input, textarea { font-family: inherit; color: inherit; }
 .answer-btn.wrong .letter { background: var(--bad); color: white; }
 .answer-btn.dim { opacity: 0.35; }
 .answer-btn:disabled { cursor: not-allowed; }
+.answer-btn.pending { border-color: var(--accent); background: rgba(255, 122, 24, 0.10); transform: translateY(-1px); }
+.answer-btn.pending .letter { background: var(--accent); color: #111; }
+.fc-rate-btn.pending { background: rgba(255, 122, 24, 0.10); transform: translateY(-2px); box-shadow: 0 0 0 2px var(--accent); }
 @keyframes pulse-correct { 0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(62,207,110,0.5); } 50% { transform: scale(1.03); box-shadow: 0 0 0 10px rgba(62,207,110,0); } 100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(62,207,110,0); } }
 @keyframes shake-wrong { 0%, 100% { transform: translateX(0); } 20% { transform: translateX(-8px); } 40% { transform: translateX(8px); } 60% { transform: translateX(-6px); } 80% { transform: translateX(4px); } }
+
+/* CONFIRM BAR — two-step "select then lock in" UI for MC / Confusables / Flashcard rating. */
+.confirm-bar { margin-bottom: 14px; padding: 14px 16px; border: 2px solid var(--accent); border-radius: var(--radius); background: rgba(255, 122, 24, 0.06); display: flex; flex-wrap: wrap; gap: 10px; align-items: center; animation: slide-in-up var(--t-med); }
+.confirm-bar.hidden { display: none; }
+.confirm-bar .cb-label { flex: 1 1 100%; font-weight: 700; color: var(--text); font-size: 14px; line-height: 1.4; }
+.confirm-bar .cb-prompt { color: var(--text-dim); font-size: 13px; margin-right: auto; font-style: italic; }
+.confirm-bar .cb-lock { background: var(--accent); color: #111; border: 0; border-radius: var(--radius); padding: 10px 16px; font-weight: 700; font-size: 14px; cursor: pointer; transition: all var(--t-fast); }
+.confirm-bar .cb-lock:hover { background: var(--accent-dark); transform: translateY(-1px); }
+.confirm-bar .cb-change { background: var(--bg-elev-2); color: var(--text); border: 1px solid var(--border-strong); border-radius: var(--radius); padding: 10px 14px; font-weight: 600; font-size: 14px; cursor: pointer; transition: all var(--t-fast); }
+.confirm-bar .cb-change:hover { background: var(--bg-elev-3); border-color: var(--text-dim); }
+.confirm-preview { margin-bottom: 10px; padding: 10px 14px; border-left: 3px solid var(--accent); background: rgba(255, 122, 24, 0.05); border-radius: 6px; font-size: 13px; color: var(--text); line-height: 1.5; }
+.confirm-preview.hidden { display: none; }
+.confirm-preview .cp-label { color: var(--text-dim); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 700; display: block; margin-bottom: 2px; }
+.confirm-preview .cp-text { color: var(--text); font-weight: 600; }
+@media (max-width: 600px) {
+  .confirm-bar { position: sticky; bottom: 8px; z-index: 10; box-shadow: 0 -4px 16px rgba(0,0,0,0.4); }
+  .confirm-bar .cb-lock, .confirm-bar .cb-change { flex: 1 1 calc(50% - 5px); min-height: 48px; }
+}
 
 /* TYPING */
 .typing-input-wrap { background: var(--bg-elev-1); border: 2px solid var(--border); border-radius: var(--radius); padding: 4px; transition: border-color var(--t-fast); margin-bottom: 12px; }
@@ -664,11 +685,20 @@ input, textarea { font-family: inherit; color: inherit; }
 
     <div id="quiz-typing-wrap" class="hidden">
       <div class="typing-input-wrap"><input id="typing-input" type="text" autocomplete="off" spellcheck="false" placeholder="Type the term…"></div>
-      <div class="typing-hint" id="typing-hint">Press Enter to submit</div>
+      <div class="typing-hint" id="typing-hint">Press Enter to lock in</div>
+      <div class="confirm-preview hidden" id="typing-preview"><span class="cp-label">Review your answer</span><span class="cp-text" id="typing-preview-text"></span></div>
     </div>
     <div id="quiz-fill-wrap" class="hidden">
       <div class="typing-input-wrap"><input id="fill-input" type="text" autocomplete="off" spellcheck="false" placeholder="Fill the blank…"></div>
-      <div class="typing-hint" id="fill-hint">Press Enter to submit</div>
+      <div class="typing-hint" id="fill-hint">Press Enter to lock in</div>
+      <div class="confirm-preview hidden" id="fill-preview"><span class="cp-label">Review your answer</span><span class="cp-text" id="fill-preview-text"></span></div>
+    </div>
+
+    <div class="confirm-bar hidden" id="confirm-bar" role="region" aria-live="polite">
+      <div class="cb-label" id="cb-label"></div>
+      <span class="cb-prompt" id="cb-prompt">Lock it in?</span>
+      <button class="cb-lock" id="cb-lock" type="button">🔒 Lock it in</button>
+      <button class="cb-change" id="cb-change" type="button">↩ Change</button>
     </div>
 
     <div class="feedback" id="feedback">
@@ -679,7 +709,7 @@ input, textarea { font-family: inherit; color: inherit; }
 
     <div class="quiz-footer">
       <button class="btn" id="btn-quiz-skip">Skip</button>
-      <button class="btn primary hidden" id="btn-quiz-submit">Submit</button>
+      <button class="btn primary hidden" id="btn-quiz-submit">🔒 Lock it in</button>
       <button class="btn primary hidden" id="btn-quiz-next">Next →</button>
     </div>
   </section>

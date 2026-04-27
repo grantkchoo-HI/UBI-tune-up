@@ -3,7 +3,7 @@
  *
  * Bump CACHE name on every release to force clients to refresh.
  */
-const CACHE = 'ubi-v5-cache-2026-04-26-r3-suspension';
+const CACHE = 'ubi-v5-cache-2026-04-26-r4-confirm-flow';
 const ASSETS = [
   './',
   './index.html',
