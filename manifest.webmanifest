@@ -1,7 +1,7 @@
 {
-  "name": "UBI Tune-Up v4 — The Wheelhouse",
-  "short_name": "UBI v4",
-  "description": "Bicycle mechanic study game — UBI practice test prep",
+  "name": "UBI Tune-Up v5 — Wrench Path + Suspension",
+  "short_name": "UBI v5",
+  "description": "Bicycle mechanic study game — UBI practice test prep. Wheels, Spec Vault, Suspension, Wrench Path, anti-memorization layer.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

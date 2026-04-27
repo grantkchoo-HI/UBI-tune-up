@@ -1,15 +1,20 @@
-/* UBI Tune-Up v4 service worker — caches everything for true offline use.
+/* UBI Tune-Up v5 service worker — caches everything for true offline use.
  * After first load, the app works fully offline forever (or until you clear data).
+ *
+ * Bump CACHE name on every release to force clients to refresh.
  */
-const CACHE = 'ubi-v4-cache-2026-04-26-r2-specvault';
+const CACHE = 'ubi-v5-cache-2026-04-26-r3-suspension';
 const ASSETS = [
   './',
   './index.html',
   './glossary.js',
-  './scenarios_v3.js',
-  './wheels_v4.js',
-  './appendix_v4.js',
-  './game_v4.js',
+  './randomization_v5.js',
+  './scenarios_v5.js',
+  './wheels_v5.js',
+  './appendix_v5.js',
+  './suspension_v5.js',
+  './wrench_path_v5.js',
+  './game_v5.js',
   './manifest.webmanifest',
 ];
 
